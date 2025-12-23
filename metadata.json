@@ -1,0 +1,5 @@
+{
+  "name": "Power Grid Hashi",
+  "description": "A logic puzzle game where you connect houses with power cables to light up the grid. Built with React, Tailwind, and Phaser 3.",
+  "requestFramePermissions": []
+}
