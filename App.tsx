@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createGame, gameInstance } from './game/phaserGame';
 import { GameScene } from './game/scenes/GameScene';
 import { Difficulty, GameEvent } from './types';
-import { RotateCcw, Flag, Play, HelpCircle, Trophy, Undo, SkipForward, AlertTriangle, Clock, Gauge, X } from 'lucide-react';
+import { RotateCcw, Flag, Play, HelpCircle, Trophy, Undo, SkipForward, AlertTriangle, Clock, Gauge, X, Check } from 'lucide-react';
 
 const App: React.FC = () => {
-  const [gameState, setGameState] = useState<'START' | 'PLAYING' | 'VICTORY' | 'FINISHED'>('START');
+  const [gameState, setGameState] = useState<'START' | 'INSTRUCTIONS' | 'PLAYING' | 'VICTORY' | 'FINISHED'>('START');
   const [difficulty, setDifficulty] = useState<Difficulty>(Difficulty.EASY);
   
   // Session Settings
@@ -53,6 +53,7 @@ const App: React.FC = () => {
 
   // Timer Logic: Pause if any modal is open or game is not playing
   useEffect(() => {
+    // Timer only runs when explicitly PLAYING and no popups are open
     const isPaused = showRules || showReportPopup || showDiffSelector || gameState !== 'PLAYING';
 
     if (!isPaused && timeLeft > 0) {
@@ -94,12 +95,16 @@ const App: React.FC = () => {
   const handleStartSession = () => {
     setStats({ [Difficulty.EASY]: 0, [Difficulty.MEDIUM]: 0, [Difficulty.HARD]: 0 });
     setTimeLeft(sessionMinutes * 60);
-    setGameState('PLAYING');
+    // Transition to instructions first, do not start game or timer yet
+    setGameState('INSTRUCTIONS');
     setShowRules(false);
-    
-    // Start the first puzzle
-    launchPuzzle(difficulty);
   };
+
+  const handleBeginPlay = () => {
+    setGameState('PLAYING');
+    // Start the first puzzle only after instructions are acknowledged
+    launchPuzzle(difficulty);
+  }
 
   const launchPuzzle = (diff: Difficulty) => {
     const scene = gameInstance?.scene.getScene('GameScene') as GameScene;
@@ -331,8 +336,8 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Start / Rules Modal */}
-      {(gameState === 'START' || showRules) && (
+      {/* Start / Instructions / Rules Modal */}
+      {(gameState === 'START' || gameState === 'INSTRUCTIONS' || showRules) && (
         <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50 backdrop-blur-md">
           <div className="bg-slate-800 text-white p-8 rounded-lg max-w-lg w-full shadow-2xl border border-slate-600">
             <h1 className="text-4xl font-bold text-yellow-400 mb-2 text-center tracking-tight">POWER GRID</h1>
@@ -381,29 +386,40 @@ const App: React.FC = () => {
                    onClick={handleStartSession}
                    className={getStartButtonClass()}
                 >
-                   START SESSION
+                   NEXT
                 </button>
                 
                 <div className="text-xs text-center text-slate-500 mt-4">
-                   Connect houses • No crossing lines • Fill the grid
+                   Instructions on next screen
                 </div>
               </div>
             ) : (
-              // Just Rules
+              // Rules / Instructions View
+              // Shows either when "showRules" is true during game OR when in "INSTRUCTIONS" state before game
               <div className="space-y-4">
-                  <div className="bg-slate-700/50 p-4 rounded text-sm leading-relaxed text-slate-200">
-                    <ul className="list-disc pl-5 space-y-2">
-                        <li>Connect houses with cables.</li>
-                        <li>Number on house = required cables.</li>
-                        <li>Max 2 cables between houses.</li>
-                        <li>Lines cannot cross.</li>
+                  <div className="text-center mb-4">
+                    <h3 className="text-lg font-bold text-white uppercase tracking-widest border-b border-slate-600 pb-2 inline-block">How to Play</h3>
+                  </div>
+                  <div className="bg-slate-700/50 p-6 rounded text-sm leading-relaxed text-slate-200 shadow-inner">
+                    <ul className="list-disc pl-5 space-y-3">
+                        <li>Connect houses with power cables.</li>
+                        <li>The number on a house represents the <strong>exact number</strong> of cables connected to it.</li>
+                        <li>You can have up to <strong>2 cables</strong> between two houses.</li>
+                        <li>Cables can only run horizontally or vertically.</li>
+                        <li><strong>Lines cannot cross</strong> each other.</li>
+                        <li>All houses must be connected into a single power network.</li>
                     </ul>
                   </div>
+                  
                   <button 
-                    onClick={() => setShowRules(false)}
-                    className="w-full py-3 bg-slate-600 hover:bg-slate-500 rounded font-bold"
+                    onClick={gameState === 'INSTRUCTIONS' ? handleBeginPlay : () => setShowRules(false)}
+                    className="w-full py-4 mt-2 bg-green-600 hover:bg-green-500 text-white rounded font-bold text-lg flex items-center justify-center gap-2 transition"
                   >
-                    Resume Game
+                    {gameState === 'INSTRUCTIONS' ? (
+                       <>Got it <Check size={20} /></>
+                    ) : (
+                       "Resume Game"
+                    )}
                   </button>
               </div>
             )}
