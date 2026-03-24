@@ -1,16 +1,22 @@
 import Phaser from 'phaser';
-import { EdgeData, NodeData } from '../../types';
+import { EdgeData, NodeData, Theme } from '../../types';
 import { House } from '../objects/House';
 
 export class CableManager {
   private scene: Phaser.Scene;
   private graphics: Phaser.GameObjects.Graphics;
   private edges: Map<string, EdgeData>; // Key: "idA-idB" (sorted)
+  private theme: Theme = Theme.POWER_GRID;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
     this.graphics = scene.add.graphics();
     this.edges = new Map();
+  }
+  
+  public setTheme(theme: Theme) {
+    this.theme = theme;
+    this.draw();
   }
 
   public reset() {
@@ -139,7 +145,37 @@ export class CableManager {
 
   private draw(isSolved: boolean = false) {
     this.graphics.clear();
-    const color = isSolved ? 0xffcc00 : 0x666666;
+    
+    let color = 0x666666;
+    let alpha = 1;
+    let width = 3;
+
+    if (this.theme === Theme.PENGUINS) {
+        // Ice Bridge Look
+        if (isSolved) {
+            color = 0x00e5ff; // Glowing Cyan
+            width = 4;
+        } else {
+            color = 0xffffff; // White Ice
+            alpha = 0.8;
+        }
+    } else if (this.theme === Theme.CITY) {
+        // Street Look
+        if (isSolved) {
+            color = 0x34d399; // Emerald green
+            width = 6;
+        } else {
+            color = 0x1f2937; // Dark asphalt
+            width = 6;
+        }
+    } else {
+        // Power Cable Look
+        if (isSolved) {
+            color = 0xffcc00; // Gold
+        } else {
+            color = 0x424242; // Dark Grey
+        }
+    }
 
     this.edges.forEach(edge => {
       const nodeA = this.scene.children.getByName(edge.nodeA) as House;
@@ -147,19 +183,37 @@ export class CableManager {
 
       if (nodeA && nodeB) {
         if (edge.count === 1) {
-          // Changed from 3 to 4
-          this.graphics.lineStyle(4, color, 1);
+          this.graphics.lineStyle(width, color, alpha);
           this.graphics.beginPath();
           this.graphics.moveTo(nodeA.x, nodeA.y);
           this.graphics.lineTo(nodeB.x, nodeB.y);
           this.graphics.strokePath();
+          
+          // Draw dashed center line for streets
+          if (this.theme === Theme.CITY) {
+             this.graphics.lineStyle(1, 0xffffff, 0.8);
+             this.graphics.beginPath();
+             // Simple dashed line approximation
+             const dx = nodeB.x - nodeA.x;
+             const dy = nodeB.y - nodeA.y;
+             const dist = Math.sqrt(dx*dx + dy*dy);
+             const steps = Math.floor(dist / 10);
+             for(let i=0; i<steps; i+=2) {
+                 const startX = nodeA.x + (dx * (i/steps));
+                 const startY = nodeA.y + (dy * (i/steps));
+                 const endX = nodeA.x + (dx * ((i+1)/steps));
+                 const endY = nodeA.y + (dy * ((i+1)/steps));
+                 this.graphics.moveTo(startX, startY);
+                 this.graphics.lineTo(endX, endY);
+             }
+             this.graphics.strokePath();
+          }
         } else {
           // Double line
           const isVert = nodeA.x === nodeB.x;
-          const offset = 5;
+          const offset = this.theme === Theme.CITY ? 8 : 6;
           
-          // Changed from 2 to 3
-          this.graphics.lineStyle(3, color, 1);
+          this.graphics.lineStyle(width, color, alpha);
           
           if (isVert) {
             this.graphics.beginPath();
@@ -168,6 +222,24 @@ export class CableManager {
             this.graphics.moveTo(nodeA.x + offset, nodeA.y);
             this.graphics.lineTo(nodeB.x + offset, nodeB.y);
             this.graphics.strokePath();
+            
+            // Draw dashed center line for streets
+            if (this.theme === Theme.CITY) {
+               this.graphics.lineStyle(1, 0xffffff, 0.8);
+               this.graphics.beginPath();
+               const dy = nodeB.y - nodeA.y;
+               const dist = Math.abs(dy);
+               const steps = Math.floor(dist / 10);
+               for(let i=0; i<steps; i+=2) {
+                   const startY = nodeA.y + (dy * (i/steps));
+                   const endY = nodeA.y + (dy * ((i+1)/steps));
+                   this.graphics.moveTo(nodeA.x - offset, startY);
+                   this.graphics.lineTo(nodeA.x - offset, endY);
+                   this.graphics.moveTo(nodeA.x + offset, startY);
+                   this.graphics.lineTo(nodeA.x + offset, endY);
+               }
+               this.graphics.strokePath();
+            }
           } else {
             this.graphics.beginPath();
             this.graphics.moveTo(nodeA.x, nodeA.y - offset);
@@ -175,6 +247,24 @@ export class CableManager {
             this.graphics.moveTo(nodeA.x, nodeA.y + offset);
             this.graphics.lineTo(nodeB.x, nodeB.y + offset);
             this.graphics.strokePath();
+            
+            // Draw dashed center line for streets
+            if (this.theme === Theme.CITY) {
+               this.graphics.lineStyle(1, 0xffffff, 0.8);
+               this.graphics.beginPath();
+               const dx = nodeB.x - nodeA.x;
+               const dist = Math.abs(dx);
+               const steps = Math.floor(dist / 10);
+               for(let i=0; i<steps; i+=2) {
+                   const startX = nodeA.x + (dx * (i/steps));
+                   const endX = nodeA.x + (dx * ((i+1)/steps));
+                   this.graphics.moveTo(startX, nodeA.y - offset);
+                   this.graphics.lineTo(endX, nodeA.y - offset);
+                   this.graphics.moveTo(startX, nodeA.y + offset);
+                   this.graphics.lineTo(endX, nodeA.y + offset);
+               }
+               this.graphics.strokePath();
+            }
           }
         }
       }

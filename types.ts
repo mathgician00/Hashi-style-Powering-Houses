@@ -4,6 +4,12 @@ export enum Difficulty {
   HARD = 'hard',
 }
 
+export enum Theme {
+  POWER_GRID = 'POWER_GRID',
+  PENGUINS = 'PENGUINS',
+  CITY = 'CITY',
+}
+
 export interface DifficultyConfig {
   gridSize: number;
   nodeCount: [number, number]; // min, max
