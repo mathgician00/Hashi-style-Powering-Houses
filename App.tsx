@@ -3,6 +3,7 @@ import { createGame, gameInstance } from './game/phaserGame';
 import { GameScene } from './game/scenes/GameScene';
 import { Difficulty, GameEvent, Theme } from './types';
 import { RotateCcw, Flag, Play, HelpCircle, Trophy, Undo, SkipForward, AlertTriangle, Clock, Gauge, X, Check, Zap, Snowflake, Palette, Building2 } from 'lucide-react';
+import { Analytics } from '@vercel/analytics/react';
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<'START' | 'INSTRUCTIONS' | 'PLAYING' | 'VICTORY' | 'FINISHED'>('START');
@@ -615,6 +616,7 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
+      <Analytics />
     </div>
   );
 };
