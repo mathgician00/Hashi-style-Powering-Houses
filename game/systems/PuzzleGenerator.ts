@@ -4,14 +4,19 @@ export class PuzzleGenerator {
   /**
    * Generates a solvable puzzle.
    * 1. Places nodes randomly.
-   * 2. Generates a spanning tree (Kruskal's) to ensure connectivity.
-   * 3. Adds extra edges for complexity.
-   * 4. Calculates required valence for each node.
+   * 2. Generates a spanning tree (Kruskal's) to ensure connectivity,
+   *    respecting each node's max-connection cap AS edges are added
+   *    (not after), so a valid tree edge can never be dropped later.
+   * 3. Adds extra edges for complexity (still capped).
+   * 4. Calculates required valence for each node from the edges actually kept.
+   * 5. Verifies the final solution graph is fully connected via BFS
+   *    before returning it — if not, generation is treated as failed
+   *    and the caller's retry loop runs again.
    */
   public static generate(difficulty: Difficulty): { nodes: NodeData[], solutionEdges: EdgeData[] } {
     const settings = DIFFICULTY_SETTINGS[difficulty];
     let attempts = 0;
-    
+
     while (attempts < 100) {
       try {
         return this.tryGenerate(settings.gridSize, settings.nodeCount, settings.maxConnections);
@@ -20,7 +25,7 @@ export class PuzzleGenerator {
         attempts++;
       }
     }
-    
+
     // Fallback simple square
     return this.createFallbackPuzzle();
   }
@@ -38,15 +43,15 @@ export class PuzzleGenerator {
         const x = Math.floor(Math.random() * gridSize);
         const y = Math.floor(Math.random() * gridSize);
         const key = `${x},${y}`;
-        
+
         // Ensure not too close to others (optional, but looks better) or overlapping
         if (!occupied.has(key)) {
-          nodes.push({ 
-            id: `n_${i}`, 
-            x, 
-            y, 
-            requiredConnections: 0, 
-            currentConnections: 0 
+          nodes.push({
+            id: `n_${i}`,
+            x,
+            y,
+            requiredConnections: 0,
+            currentConnections: 0
           });
           occupied.add(key);
           placed = true;
@@ -58,15 +63,15 @@ export class PuzzleGenerator {
 
     // 2. Identify all possible valid orthogonal edges (neighbors)
     let potentialEdges: { u: NodeData, v: NodeData, dist: number }[] = [];
-    
+
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         const u = nodes[i];
         const v = nodes[j];
-        
+
         // Check alignment
         if (u.x !== v.x && u.y !== v.y) continue;
-        
+
         // Check if any node is blocking the path
         if (this.isNodeBetween(u, v, nodes)) continue;
 
@@ -83,6 +88,14 @@ export class PuzzleGenerator {
     const ds = new DisjointSet(nodes.length);
     const nodeIndexMap = new Map(nodes.map((n, i) => [n.id, i]));
 
+    // FIX (root cause): track live degree per node WHILE building the tree,
+    // so a tree edge is only added if it fits under the cap. Previously the
+    // cap was only enforced after the fact (step 5 below), which could
+    // silently drop a spanning-tree edge that other nodes' connectivity
+    // depended on, producing a puzzle with numbers derived from a graph
+    // that no longer matched — sometimes making it unsolvable.
+    const degree = new Map<string, number>(nodes.map(n => [n.id, 0]));
+
     // Helper to check crossing
     const isCrossing = (u: NodeData, v: NodeData) => {
       return edges.some(e => {
@@ -92,26 +105,44 @@ export class PuzzleGenerator {
       });
     };
 
-    // Add Spanning Tree edges
+    // Add Spanning Tree edges, now degree-cap aware
     for (const p of potentialEdges) {
       const uIdx = nodeIndexMap.get(p.u.id)!;
       const vIdx = nodeIndexMap.get(p.v.id)!;
 
       if (ds.find(uIdx) !== ds.find(vIdx)) {
         if (!isCrossing(p.u, p.v)) {
-          ds.union(uIdx, vIdx);
-          // Randomly decide 1 or 2 cables for initial tree
-          const count = Math.random() > 0.7 ? 2 : 1;
-          edges.push({ nodeA: p.u.id, nodeB: p.v.id, count });
+          const degU = degree.get(p.u.id)!;
+          const degV = degree.get(p.v.id)!;
+
+          // Prefer a double cable only if both nodes can still afford it;
+          // otherwise fall back to a single cable; otherwise skip this
+          // potential tree edge entirely (leaves components unmerged —
+          // caught by the ds.count check below, which now correctly
+          // reflects a real, final failure rather than a fixable one).
+          let count = 0;
+          if (Math.random() > 0.7 && degU + 2 <= maxConnections && degV + 2 <= maxConnections) {
+            count = 2;
+          } else if (degU + 1 <= maxConnections && degV + 1 <= maxConnections) {
+            count = 1;
+          }
+
+          if (count > 0) {
+            ds.union(uIdx, vIdx);
+            edges.push({ nodeA: p.u.id, nodeB: p.v.id, count });
+            degree.set(p.u.id, degU + count);
+            degree.set(p.v.id, degV + count);
+          }
         }
       }
     }
 
-    // Verify connectivity
+    // Verify connectivity. This is now a genuine failure (not one caused
+    // by a later, avoidable pruning step), so retrying with a fresh
+    // random layout is the correct response.
     if (ds.count > 1) throw new Error("Graph not connected");
 
-    // 4. Add Extra Edges (Complexity)
-    // Try to add about 20% more edges from the remaining potential list
+    // 4. Add Extra Edges (Complexity) — still degree-cap aware
     const extraEdgesTarget = Math.floor(edges.length * 0.3);
     let addedExtra = 0;
 
@@ -119,65 +150,105 @@ export class PuzzleGenerator {
       if (addedExtra >= extraEdgesTarget) break;
 
       // Check if edge already exists
-      const exists = edges.some(e => 
-        (e.nodeA === p.u.id && e.nodeB === p.v.id) || 
+      const exists = edges.some(e =>
+        (e.nodeA === p.u.id && e.nodeB === p.v.id) ||
         (e.nodeA === p.v.id && e.nodeB === p.u.id)
       );
-      
+
       if (!exists && !isCrossing(p.u, p.v)) {
-        // Only add if it doesn't violate max connections (heuristic check)
-        // Detailed check happens later, this is just to fill out the graph
-        const count = Math.random() > 0.6 ? 2 : 1;
-        edges.push({ nodeA: p.u.id, nodeB: p.v.id, count });
-        addedExtra++;
+        const degU = degree.get(p.u.id)!;
+        const degV = degree.get(p.v.id)!;
+
+        let count = 0;
+        if (Math.random() > 0.6 && degU + 2 <= maxConnections && degV + 2 <= maxConnections) {
+          count = 2;
+        } else if (degU + 1 <= maxConnections && degV + 1 <= maxConnections) {
+          count = 1;
+        }
+
+        if (count > 0) {
+          edges.push({ nodeA: p.u.id, nodeB: p.v.id, count });
+          degree.set(p.u.id, degU + count);
+          degree.set(p.v.id, degV + count);
+          addedExtra++;
+        }
       }
     }
 
     // 5. Calculate Requirements (The "Puzzle")
+    // No pruning happens here anymore — every edge in `edges` was already
+    // admitted under the cap, so all of them become the final solution.
     nodes.forEach(n => n.requiredConnections = 0);
-    
-    // Clean up edges that make nodes exceed max connections
-    const validEdges: EdgeData[] = [];
-    
-    // We process edges and apply them. If a node gets too full, we downgrade or drop the edge.
-    // This is a simplification; a perfect generator would backtrack, but this works for game jams.
-    for (const e of edges) {
+
+    edges.forEach(e => {
       const nA = nodes.find(n => n.id === e.nodeA)!;
       const nB = nodes.find(n => n.id === e.nodeB)!;
-      
-      if (nA.requiredConnections + e.count <= maxConnections && 
-          nB.requiredConnections + e.count <= maxConnections) {
-        
-        nA.requiredConnections += e.count;
-        nB.requiredConnections += e.count;
-        validEdges.push(e);
-      }
-    }
+      nA.requiredConnections += e.count;
+      nB.requiredConnections += e.count;
+    });
 
-    // Final sanity check: prune nodes with 0 connections (shouldn't happen due to Kruskal unless maxConnections killed them)
-    // Actually, we must ensure connectivity of the FINAL graph. 
-    // For this simple version, we assume the heuristic mostly holds. 
-    // If a node has 0 req connections, the puzzle is invalid.
+    const validEdges: EdgeData[] = edges;
+
+    // Sanity check: isolated node (shouldn't happen — every node is part
+    // of the spanning tree by construction — kept as a defensive check).
     if (nodes.some(n => n.requiredConnections === 0)) throw new Error("Isolated node");
+
+    // FIX (safety net): verify the final solution graph is a single
+    // connected component using the same BFS approach GameScene.ts uses
+    // at solve-time. This guarantees a puzzle is never returned to the
+    // player unless it is provably solvable by at least one arrangement
+    // (the one we just built).
+    if (!this.isFullyConnected(nodes, validEdges)) {
+      throw new Error("Final solution graph is not fully connected");
+    }
 
     return { nodes, solutionEdges: validEdges };
   }
 
   // --- Helpers ---
 
+  private static isFullyConnected(nodes: NodeData[], edges: EdgeData[]): boolean {
+    if (nodes.length === 0) return true;
+
+    const adj = new Map<string, string[]>();
+    edges.forEach(e => {
+      if (!adj.has(e.nodeA)) adj.set(e.nodeA, []);
+      if (!adj.has(e.nodeB)) adj.set(e.nodeB, []);
+      adj.get(e.nodeA)!.push(e.nodeB);
+      adj.get(e.nodeB)!.push(e.nodeA);
+    });
+
+    const startId = nodes[0].id;
+    const visited = new Set<string>([startId]);
+    const queue = [startId];
+
+    while (queue.length > 0) {
+      const curr = queue.shift()!;
+      const neighbors = adj.get(curr) || [];
+      for (const n of neighbors) {
+        if (!visited.has(n)) {
+          visited.add(n);
+          queue.push(n);
+        }
+      }
+    }
+
+    return visited.size === nodes.length;
+  }
+
   private static isNodeBetween(u: NodeData, v: NodeData, allNodes: NodeData[]): boolean {
     const isVertical = u.x === v.x;
-    
+
     for (const node of allNodes) {
       if (node.id === u.id || node.id === v.id) continue;
-      
+
       if (isVertical) {
-        if (node.x === u.x && 
+        if (node.x === u.x &&
            ((node.y > u.y && node.y < v.y) || (node.y > v.y && node.y < u.y))) {
           return true;
         }
       } else {
-        if (node.y === u.y && 
+        if (node.y === u.y &&
            ((node.x > u.x && node.x < v.x) || (node.x > v.x && node.x < u.x))) {
           return true;
         }
